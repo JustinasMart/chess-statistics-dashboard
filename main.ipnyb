@@ -1,4 +1,5 @@
 import requests
+import re
 import json
 import pandas as pd
 from dateutil.rrule import rrule, MONTHLY
@@ -72,7 +73,33 @@ pgn_data = pgn_data.drop('ECOUrl', axis=1)
 # Drop the 'Date' and 'ECO' columns which duplicate UTCDate and Opening columns
 pgn_data = pgn_data.drop(['Date', 'ECO'], axis=1)
 
+# Separate white and black moves with times into separate columns
+
+white_pattern = r'\d+\.\s\w+\s\{[^}]+\}'
+pgn_data["White_Moves"] = pgn_data["Moves"].apply(lambda x: ' '.join(re.findall(white_pattern, x)))
+black_pattern = r'\d+\.\.\.\s\w+\s\{[^}]+\}'
+pgn_data["Black_Moves"] = pgn_data["Moves"].apply(lambda x: ' '.join(re.findall(black_pattern, x)))
+
+# Simplify formatting of moves and times
+
+def format_moves_with_time(match):
+    move_number = match.group(1).rstrip('. ')
+    move = match.group(2)
+    time = match.group(3)
+    return f"{move_number}. {move}, {time};"
+
+simplified_pattern = r'(\d+(?:\.|\.{3}))\s+(\S+)\s+{\[%clk\s+(\d+:\d+:\d+(?:\.\d+)?)\]}'
+
+pgn_data["White_Moves"] = pgn_data["White_Moves"].str.replace(simplified_pattern, format_moves_with_time)
+pgn_data["Black_Moves"] = pgn_data["Black_Moves"].str.replace(simplified_pattern, format_moves_with_time)
+
+
+# Function to extract time from the timestamp
+
+
+# Output the transformed DataFrame
 print(pgn_data)
+
 
 
 
