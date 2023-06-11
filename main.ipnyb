@@ -1,0 +1,78 @@
+import requests
+import json
+import pandas as pd
+from dateutil.rrule import rrule, MONTHLY
+from datetime import datetime
+
+username = "Ukezare"
+start_month = 11
+start_year = 2020
+end_month = datetime.now().month
+end_year = datetime.now().year
+
+def months(start_month, start_year, end_month, end_year):
+    start = datetime(start_year, start_month, 1)
+    end = datetime(end_year, end_month, 1)
+    return [(d.month, d.year) for d in rrule(MONTHLY, dtstart=start, until=end)]
+
+def get_all_game_data(start_month, start_year, end_month, end_year):
+    final_df = pd.DataFrame()
+    for ym in months(start_month, start_year, end_month, end_year):
+        year = ym[1]
+        month = str(f"{ym[0]:02d}")
+        url = f"https://api.chess.com/pub/player/{username}/games/{year}/{month}"
+        response = requests.get(url)
+
+        if response.status_code == 200:
+            data = json.loads(response.content)
+            df = pd.DataFrame(data["games"])
+            final_df = pd.concat([final_df, df])
+        else:
+            print(f"Failed to retrieve game data. Status code: {response.status_code}")
+    return final_df
+
+def drop_columns_with_single_value(df):
+    for column in df.columns:
+        unique_values = df[column].unique()
+        if len(unique_values) == 1:
+            df.drop(column, axis=1, inplace=True)
+    return df
+
+all_games_df = get_all_game_data(start_month, start_year, end_month, end_year)
+pgn_data = all_games_df[["pgn"]]
+pgn_data['pgn'] = pgn_data['pgn'].str.strip()
+pgn_data = pgn_data.loc[~pgn_data['pgn'].str.contains(r'\[SetUp "1"\]|\[FEN "[^"]*"\]')]
+pgn_data = pgn_data['pgn'].str.split('\n', expand=True)
+
+# Extract the first word from each non-empty cell in the first row as column names
+pgn_data.columns = pgn_data.iloc[0].apply(lambda x: x.split()[0].strip("[]") if x else "")
+
+# Drop the first row since it contains the old column names
+pgn_data = pgn_data.iloc[1:].reset_index(drop=True)
+pgn_data = pgn_data.drop(pgn_data.columns[pgn_data.columns == ''].tolist()[0], axis=1)
+
+# Rename the last column
+last_column = pgn_data.columns[-1]
+new_column_name = 'Moves'
+pgn_data = pgn_data.rename(columns={last_column: new_column_name})
+
+# Apply the drop_columns_with_single_value function to pgn_data
+pgn_data = drop_columns_with_single_value(pgn_data)
+
+for column in pgn_data.columns[:-1]:
+    pgn_data[column] = pgn_data[column].str.strip("[]")
+    pgn_data[column] = pgn_data[column].str.split().str[1:]
+    pgn_data[column] = pgn_data[column].apply(lambda x: ' '.join(x) if isinstance(x, list) else x)
+    pgn_data[column] = pgn_data[column].str.strip('""')
+
+# Extract and rename the 'Opening' column
+pgn_data['Opening'] = pgn_data['ECOUrl'].str.split('/').str[-1].str.replace('-', ' ')
+pgn_data = pgn_data.drop('ECOUrl', axis=1)
+
+# Drop the 'Date' and 'ECO' columns which duplicate UTCDate and Opening columns
+pgn_data = pgn_data.drop(['Date', 'ECO'], axis=1)
+
+print(pgn_data)
+
+
+
